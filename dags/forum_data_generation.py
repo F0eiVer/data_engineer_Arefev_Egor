@@ -5,6 +5,7 @@ from airflow import DAG
 from datetime import date, datetime, timedelta
 from airflow.operators.python import PythonOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.models.param import Param
 import pandera as pa
 import pandas as pd 
 
@@ -513,21 +514,26 @@ def _load_to_postgres(ti, year, month):
 with DAG(
     dag_id="logs_generation_and_upload_operators",
     start_date=datetime(2024, 1, 1),
-    schedule=None,          # запуск вручную; замените на cron при необходимости
+    schedule=None,
     catchup=False,
     tags=["logs", "postgres"],
+    params={
+        "year": Param(2026, type="integer", title="Год"),
+        "month": Param(3, type="integer", title="Месяц"),
+    },
+    render_template_as_native_obj=True
 ) as dag:
 
     generate_users = PythonOperator(
         task_id="generated_users",
         python_callable=_generate_users,
-        op_kwargs={'year': 2026, 'month': 3} 
+        op_kwargs={'year': '{{ params.year }}', 'month': '{{ params.month }}'}
     )
 
     generate_logs = PythonOperator(
         task_id="generate_logs_task",
         python_callable=_generate_logs,
-        op_kwargs={'year': 2026, 'month': 3} 
+        op_kwargs={'year': '{{ params.year }}', 'month': '{{ params.month }}'} 
     )
 
     validate_generated_data = PythonOperator(
@@ -538,9 +544,7 @@ with DAG(
     load_logs = PythonOperator(
         task_id="load_logs",
         python_callable=_load_to_postgres,
-        op_kwargs={'year': 2026, 'month': 3} 
+        op_kwargs={'year': '{{ params.year }}', 'month': '{{ params.month }}'} 
     )
 
-    # Явно выстраиваем зависимости.
-    # Обе задачи загрузки зависят от генерации и могут выполняться параллельно.
     generate_users >> generate_logs >> validate_generated_data >> load_logs
