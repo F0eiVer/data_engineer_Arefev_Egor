@@ -105,6 +105,9 @@ def random_datetime_in_interval(min_datetime: datetime, max_datetime: datetime) 
     return min_datetime + timedelta(seconds=random_seconds)
 
 def iter_month(year, month):
+    """
+    Генератор всех дней в месяце
+    """
     d = datetime(year, month, 1)
     while d.month == month:
         yield d
@@ -417,13 +420,13 @@ def _validate_generated_data(ti):
     for i in range(1, len(logs_df_sorted)):
         if logs_df_sorted.iloc[i]['action_type_id'] == action_types['LOGIN'] and logs_df_sorted.iloc[i - 1]['action_type_id'] != action_types['LOGOUT']:
             raise pa.errors.SchemaError(
-                schema=None,  # или ваша схема
+                schema=None,
                 data=logs_df_sorted,
                 message="был совершен вход, но сесия начавшаяся ранее, не была при этом завершена"
             )
         if logs_df_sorted.iloc[i]['action_type_id'] == action_types['LOGOUT'] and logs_df_sorted.iloc[i - 1]['action_type_id'] != action_types['LOGIN']:
             raise pa.errors.SchemaError(
-                schema=None,  # или ваша схема
+                schema=None,
                 data=logs_df_sorted,
                 message="был совершен выход, но при этом ранее не было совершено входа"
             )
@@ -432,7 +435,7 @@ def _validate_generated_data(ti):
                        (logs_df['response_status'] != 'error') &
                        (logs_df['user_id'].isna())]) > 0:
         raise pa.errors.SchemaError(
-            schema=None,  # или ваша схема
+            schema=None,
             data=logs_df.loc[(logs_df['action_type_id'] == action_types['CREATE_TOPIC']) &
                                     (logs_df['user_id'].isna())],
             message="Существуют логи, где тему создал неавторизованный пользователь"
@@ -451,12 +454,6 @@ def _load_to_postgres(ti, year, month):
     messages = ti.xcom_pull(task_ids="generate_logs_task", key="my_messages")
     users = ti.xcom_pull(task_ids="generate_logs_task", key="my_users")
 
-    if not users:
-        print("Нет логов приложения для загрузки.")
-        return
-
-    pg_hook = PostgresHook(postgres_conn_id="my_postgres")
-
     sql = f"""
         CREATE TABLE IF NOT EXISTS forum_logs_{year}_{month}
         PARTITION OF forum_logs
@@ -464,12 +461,14 @@ def _load_to_postgres(ti, year, month):
         TO ('{(date(year, month, 1) + timedelta(days=31)).replace(day=1)}');
     """
     
-    pg_hook.run(sql)
-
-    conn = pg_hook.get_conn()
-    cur = conn.cursor()
-
     try:
+        pg_hook = PostgresHook(postgres_conn_id="my_postgres")
+        pg_hook.run(sql)
+
+        conn = pg_hook.get_conn()
+        cur = conn.cursor()
+
+    
         cur.executemany(
             """
             INSERT INTO users (user_id, user_name, email, registered_at)
@@ -513,7 +512,7 @@ def _load_to_postgres(ti, year, month):
 
 with DAG(
     dag_id="forum_data_generation",
-    start_date=datetime(2024, 1, 1),
+    start_date=datetime(2026, 10, 1),
     schedule=None,
     catchup=False,
     tags=["logs", "postgres"],

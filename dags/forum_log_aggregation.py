@@ -90,25 +90,30 @@ def _transform_aggregates(ti):
     """
     logs_df = ti.xcom_pull(task_ids="extract_raw_logs", key="raw_logs")
 
+    # Количество новых зарегистрированных аккаунтов
     new_accounts = logs_df.loc[logs_df['action_type_id'] == action_types['REGISTER'], 'user_id'].groupby(logs_df['event_ts'].dt.normalize()).count()
-
+    
+    # Общее количество сообщений за день
     total_messages = logs_df.loc[logs_df['action_type_id'] == action_types['CREATE_MESSAGE'], 'user_id'].groupby(logs_df['event_ts'].dt.normalize()).size()
     
+    # Доля сообщений от анонимов (% от всех сообщений за день)
     anon_messages_pct = (logs_df.loc[(logs_df['action_type_id'] == action_types['CREATE_MESSAGE']) 
                                     & (logs_df['user_id'].isna()), 'user_id'].groupby(logs_df['event_ts'].dt.normalize()).size() 
                                     / total_messages * 100)
 
+    # Средняя длина сессии в секундах (время между логином и логаутом)
     login = logs_df.loc[logs_df['action_type_id'] == action_types['LOGIN'], ["user_id", "event_ts"]].sort_values(["user_id", "event_ts"]).reset_index()
     logout = logs_df.loc[logs_df['action_type_id'] == action_types['LOGOUT'], ["user_id", "event_ts"]].sort_values(["user_id", "event_ts"]).reset_index()
     login['diff'] = logout['event_ts'] - login['event_ts']
     login['diff'] = login['diff'].dt.total_seconds()
     avg_session_duration_sec = login['diff'].groupby(login['event_ts'].dt.normalize()).mean()
 
+    # Процентное изменение количества тем относительно предыдущего дня
     tmp = logs_df.loc[(logs_df['action_type_id'] == action_types['CREATE_TOPIC']) 
                       & (logs_df['response_status'] == 'success'), 'user_id'].groupby(logs_df['event_ts'].dt.normalize()).count()
-
     topics_growth_pct = (tmp - tmp.shift(1)) / tmp.shift(1) * 100
 
+    # Retention D1: доля пользователей, вернувшихся на следующий день после регистрации
     tmp = logs_df.copy()
     tmp['event_ts'] = tmp['event_ts'].dt.normalize() # просто дата без времени
 
@@ -144,13 +149,19 @@ def _transform_aggregates(ti):
     return aggregate_logs
 
 def _export_to_csv(ti):
+    """
+    Функция по загрузке обработанных данных в csv файл
+    """
     aggregate_logs = ti.xcom_pull(task_ids="transform_aggregates", key="aggregate_logs")
 
     aggregate_logs.to_csv('/opt/airflow/data/aggregate_logs.csv')
 
     return True
 
-def _alert_on_anomaly(ti):
+def _alert_on_anomaly():
+    """
+    Функция логирования предупреждений, если показатели выходят за нормы.
+    """
     data = pd.read_csv('/opt/airflow/data/aggregate_logs.csv')
 
     for i in range(len(data)):
@@ -188,7 +199,7 @@ def _alert_on_anomaly(ti):
 
 with DAG(
     dag_id="forum_log_aggregation",
-    start_date=datetime(2024, 1, 1),
+    start_date=datetime(2026, 10, 1),
     schedule="@daily",
     catchup=False,
     params={
