@@ -13,7 +13,7 @@
 
 Это можно сделать командой 
 ```bash
-mkdir logs config plugins
+mkdir logs config plugins data
 ```
 
 Также в корне проекта необходимо добавить файл `.env`
@@ -53,7 +53,68 @@ docker compose up -d
 Основные части проекта, это генерация данных, представляющих собой логи, и сбор некоторой информации из этих данных.
 
 ## Схема БД
+![alt text](image.png)
 
+## DDL и DML операции для создания схемы
+
+Эти операции необходимо выполнить последовательно чтобы сформировать архитектуру БД с которой мы будем работать
+
+```sql
+create table if not exists  users (
+	user_id bigserial primary key,
+	user_name varchar(256) unique not null,
+	email varchar(254) unique, -- максимальная длинна электронной почты 254 символа
+	registered_at timestamp not null
+)
+
+create table if not exists  topics (
+	topic_id bigserial primary key,
+	author_id bigint not null references users(user_id),
+	title varchar(512) not null,
+	description text,
+	created_at timestamp not null,
+	deleted_at timestamp
+);
+
+create table if not exists  messages (
+	message_id bigserial primary key,
+	topic_id bigint not null references topics(topic_id),
+	author_id bigint references users(user_id),
+	body text,
+	created_at timestamp not null
+);
+
+create table if not exists action_types (
+	action_type_id smallserial primary key,
+	description varchar(256) unique not null
+);
+
+create table if not exists forum_logs (
+  log_id         bigserial,
+  event_ts       timestamp not null,
+  user_id        bigint  references users(user_id),
+  action_type_id smallint not null references action_types(action_type_id),
+  object_id      bigint,
+  object_type    varchar(256),
+  response_status varchar(256) not null, 
+  error_code     varchar(256),     
+  PRIMARY KEY (log_id, event_ts)
+) PARTITION BY RANGE (event_ts)
+```
+
+Затем нужно вставить данные которые мы будем считать неизменяемыми, это данные о типах действия пользователя
+
+```sql
+insert into action_types values 
+(1, 'FIRST_VISIT'),
+(2, 'REGISTER'),
+(3, 'LOGIN'),
+(4, 'LOGOUT'),
+(5, 'CREATE_TOPIC'),
+(6, 'ENTRY_TOPIC'),
+(7, 'DELETE_TOPIC'),
+(8, 'CREATE_MESSAGE')
+```
 
 ## DAG генерации данных
 Для генерации был реализован DAG `forum_data_generation`, который реализует генирацию всех необходимых по ТЗ логов, учитывая прописанные ограничения. Затем происзодит валидацию данных.
@@ -68,6 +129,10 @@ docker compose up -d
 Даг запускается вручную, так же при запуске мы можем передать через **Airflow Params** год и месяц, за который нужно сгенерировать данные.
 
 В этом DAG-е я реализовал передачу данных напрямую через XCom, так как генерирую относительно небольшое количество логов (сделал так, поскольку это тестовое задание), при реальных же данных с большим масштабом, так конечно же делать нельзя, так как будет перегружена БД метаданных Airflow. Лучше передавать, через XCom ссылку с путем к данным.
+
+## DAG агрегации данных
+
+После успешной обработки DAG-a в папке data/ будет создаваться csv файл с необходимой статистикой.
 
 ## Партиционирование
 Для таблицы логов решил создавать помесячные партиции данных. При таком выборе диапазонов партиционирования, даже за несколько лет количество партиций не разрастется слишком сильно, но при этом данные будут обладать значительным эффектом отсечения.
@@ -85,12 +150,6 @@ docker compose up -d
 
 Из-за чего мы понимаем, что над таблицей будут преобладать DML операции (наверное в основном insert), а не DQL, а это очевидный антипатерн для создания индексов.
 
-Мне кажется что в данном случае лучшим решением было бы посмотреть и оценить скорость выполнения запроса по сбору статистики, и если его выполнение происходит за адекватное время, то не добавлять дополнительные индексы, а если же это не так, то добавить минимальное их количество, для ускорения запросов к БД.
+Также исходя из ТЗ можно заметить, что из БД мы вытягиваем сырые логи, а статистику собираем уже при помощи python, из-за чего нам в целом не понадобятся индексы для таблицы с логами.
 
-
-
-
-
-
-
-
+Так что в данном задании можно обойтись только автоматически созданными индексами. Допольнительных добавлять нет необходимости.
