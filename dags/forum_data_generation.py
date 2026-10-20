@@ -167,7 +167,7 @@ def _generate_logs(ti, year: int, month: int):
         for i in user_login_logout[user_indx]:
             max_logout = max(max_logout, i[1])
 
-        login_t = random_datetime_in_day(max_logout)
+        login_t = random_datetime_in_interval(max_logout, min(max_logout + timedelta(days=3), max_logout.replace(month=max_logout.month + 1, day=1, hour=0, minute=0, second=0) - timedelta(seconds=1)))
         logout_t = random_datetime_in_day(login_t)
 
         user_login_logout[user_indx].append((login_t, logout_t))
@@ -512,7 +512,7 @@ def _load_to_postgres(ti, year, month):
 
 
 with DAG(
-    dag_id="logs_generation_and_upload_operators",
+    dag_id="forum_data_generation",
     start_date=datetime(2024, 1, 1),
     schedule=None,
     catchup=False,
